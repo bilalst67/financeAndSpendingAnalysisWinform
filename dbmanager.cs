@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 
 namespace financeAndSpendingAnalysisWinform;
+
 
 public static class DbManager
 {
@@ -16,23 +18,78 @@ public static class DbManager
             var command = connection.CreateCommand();
             command.CommandText = @"
                 CREATE TABLE IF NOT EXISTS Islemler (Id INTEGER PRIMARY KEY AUTOINCREMENT, Tur TEXT, Kategori TEXT, Miktar REAL, Tarih TEXT);
-                CREATE TABLE IF NOT EXISTS PeriyodikIslemler (Id INTEGER PRIMARY KEY AUTOINCREMENT, Tur TEXT, Kategori TEXT, Miktar REAL, Gun INTEGER, SonEklemeAyYil TEXT);";
+                CREATE TABLE IF NOT EXISTS PeriyodikIslemler (Id INTEGER PRIMARY KEY AUTOINCREMENT, Tur TEXT, Kategori TEXT, Miktar REAL, Gun INTEGER, SonEklemeAyYil TEXT);
+                CREATE TABLE IF NOT EXISTS Kategoriler (Id INTEGER PRIMARY KEY AUTOINCREMENT, Ad TEXT UNIQUE);"; 
             command.ExecuteNonQuery();
+
+            string[] varsayilanlar = { "Market", "Ulaşım", "Fatura", "Eğlence", "Maaş", "Avans" };
+            foreach (var kat in varsayilanlar)
+            {
+                KategoriEkle(kat);
+            }
         }
     }
 
-    public static void PeriyodikIslemEkle(string tur, string kategori, decimal miktar, int gun)
+    public static void KategoriEkle(string kategoriAdi)
+    {
+        if (string.IsNullOrWhiteSpace(kategoriAdi)) return;
+
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            var cmd = connection.CreateCommand();
+            cmd.CommandText = "INSERT OR IGNORE INTO Kategoriler (Ad) VALUES ($ad)";
+            cmd.Parameters.AddWithValue("$ad", kategoriAdi.Trim());
+            cmd.ExecuteNonQuery();
+        }
+    }
+
+    public static void KategoriSil(string kategoriAdi)
+    {
+        if (string.IsNullOrWhiteSpace(kategoriAdi)) return;
+
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            var cmd = connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM Kategoriler WHERE Ad=@ad";
+            cmd.Parameters.AddWithValue("@ad", kategoriAdi.Trim());
+            cmd.ExecuteNonQuery();
+        }
+    }
+    
+    public static List<string> KategorileriGetir()
+    {
+        var liste = new List<string>();
+        using (var connection = new SqliteConnection(ConnectionString))
+        {
+            connection.Open();
+            var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT Ad FROM Kategoriler ORDER BY Ad ASC"; // Alfabetik sıralı gelsin
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    liste.Add(reader.GetString(0));
+                }
+            }
+        }
+        return liste;
+    }
+
+    public static void PeriyodikIslemEkleGelistirilmis(string tur, string kategori, decimal miktar, int gun, string sonEklenenAy)
     {
         using (var connection = new SqliteConnection(ConnectionString))
         {
             connection.Open();
-            var command = connection.CreateCommand();
-            command.CommandText = "INSERT INTO PeriyodikIslemler (Tur, Kategori, Miktar, Gun, SonEklemeAyYil) VALUES ($tur, $kategori, $miktar, $gun, '')";
-            command.Parameters.AddWithValue("$tur", tur);
-            command.Parameters.AddWithValue("$kategori", kategori);
-            command.Parameters.AddWithValue("$miktar", miktar);
-            command.Parameters.AddWithValue("$gun", gun);
-            command.ExecuteNonQuery();
+            var cmd = connection.CreateCommand();
+            cmd.CommandText = "INSERT INTO PeriyodikIslemler (Tur, Kategori, Miktar, Gun, SonEklemeAyYil) VALUES ($tur, $kategori, $miktar, $gun, $ay)";
+            cmd.Parameters.AddWithValue("$tur", tur);
+            cmd.Parameters.AddWithValue("$kategori", kategori);
+            cmd.Parameters.AddWithValue("$miktar", miktar);
+            cmd.Parameters.AddWithValue("$gun", gun);
+            cmd.Parameters.AddWithValue("$ay", sonEklenenAy);
+            cmd.ExecuteNonQuery();
         }
     }
 
@@ -40,6 +97,8 @@ public static class DbManager
     {
         string buAyYil = DateTime.Now.ToString("MM/yyyy");
         int bugun = DateTime.Now.Day;
+
+        var eklenecekler = new List<(int Id, string Tur, string Kategori, decimal Miktar)>();
 
         using (var connection = new SqliteConnection(ConnectionString))
         {
@@ -53,13 +112,20 @@ public static class DbManager
             {
                 while (reader.Read())
                 {
-                    IslemEkle(reader.GetString(1), reader.GetString(2), reader.GetDecimal(3), DateTime.Now.ToShortDateString());
-                    var up = connection.CreateCommand();
-                    up.CommandText = "UPDATE PeriyodikIslemler SET SonEklemeAyYil = $buAyYil WHERE Id = $id";
-                    up.Parameters.AddWithValue("$buAyYil", buAyYil);
-                    up.Parameters.AddWithValue("$id", reader.GetInt32(0));
-                    up.ExecuteNonQuery();
+                    eklenecekler.Add((reader.GetInt32(0), reader.GetString(1), reader.GetString(2), reader.GetDecimal(3)));
                 }
+            }
+
+            foreach (var item in eklenecekler)
+            {
+                string gercekTarih = new DateTime(DateTime.Now.Year, DateTime.Now.Month, bugun).ToShortDateString();
+                IslemEkle(item.Tur, item.Kategori, item.Miktar, gercekTarih);
+
+                var up = connection.CreateCommand();
+                up.CommandText = "UPDATE PeriyodikIslemler SET SonEklemeAyYil = $buAyYil WHERE Id = $id";
+                up.Parameters.AddWithValue("$buAyYil", buAyYil);
+                up.Parameters.AddWithValue("$id", item.Id);
+                up.ExecuteNonQuery();
             }
         }
     }
@@ -67,23 +133,36 @@ public static class DbManager
     public static decimal AylikToplamGetir(string tur, int ayOffset)
     {
         DateTime hedef = DateTime.Now.AddMonths(ayOffset);
-        string format = hedef.ToString("M/d/yyyy").Split('/')[0] + "/" + hedef.ToString("M/d/yyyy").Split('/')[2]; // Basit ay/yil kontrolu
         decimal toplam = 0;
         using (var connection = new SqliteConnection(ConnectionString))
         {
             connection.Open();
             var command = connection.CreateCommand();
-            command.CommandText = "SELECT SUM(Miktar) FROM Islemler WHERE Tur = $tur AND Tarih LIKE $tarih";
+            command.CommandText = "SELECT Miktar, Tarih FROM Islemler WHERE Tur = $tur";
             command.Parameters.AddWithValue("$tur", tur);
-            command.Parameters.AddWithValue("$tarih", "%" + hedef.Year.ToString());
-            var res = command.ExecuteScalar();
-            if (res != DBNull.Value && res != null) toplam = Convert.ToDecimal(res);
+            
+            using (var reader = command.ExecuteReader())
+            {
+                while(reader.Read())
+                {
+                     if(DateTime.TryParse(reader.GetString(1), out DateTime dt))
+                     {
+                         if(dt.Month == hedef.Month && dt.Year == hedef.Year)
+                         {
+                             toplam += reader.GetDecimal(0);
+                         }
+                     }
+                }
+            }
         }
         return toplam;
     }
 
     public static void IslemEkle(string tur, string kategori, decimal miktar, string tarih)
     {
+        // YENİ: Bir işlem eklendiğinde, o kategoriyi veritabanına da eklemeyi dene. (Zaten varsa bir şey yapmaz)
+        KategoriEkle(kategori);
+
         using (var connection = new SqliteConnection(ConnectionString))
         {
             connection.Open();
@@ -111,6 +190,8 @@ public static class DbManager
 
     public static void IslemGuncelle(int id, string tur, string kategori, decimal miktar, string tarih)
     {
+        KategoriEkle(kategori); // Güncellerken yeni kategori yazılmışsa onu da kaydet
+
         using (var connection = new SqliteConnection(ConnectionString))
         {
             connection.Open();
