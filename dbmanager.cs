@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Security.Cryptography;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 namespace financeAndSpendingAnalysisWinform;
@@ -9,6 +9,9 @@ namespace financeAndSpendingAnalysisWinform;
 public static class DbManager
 {
     private const string ConnectionString = "Data Source=finans.db";
+
+    public static readonly string[] VarsayilanGiderler = { "Market", "Ulaşım", "Fatura", "Eğlence" };
+    public static readonly string[] VarsayilanGelirler = { "Maaş", "Avans", "Burs", "Ek Gelir" };
 
     public static void VeritabaniniHazirla()
     {
@@ -19,53 +22,56 @@ public static class DbManager
             command.CommandText = @"
                 CREATE TABLE IF NOT EXISTS Islemler (Id INTEGER PRIMARY KEY AUTOINCREMENT, Tur TEXT, Kategori TEXT, Miktar REAL, Tarih TEXT);
                 CREATE TABLE IF NOT EXISTS PeriyodikIslemler (Id INTEGER PRIMARY KEY AUTOINCREMENT, Tur TEXT, Kategori TEXT, Miktar REAL, Gun INTEGER, SonEklemeAyYil TEXT);
-                CREATE TABLE IF NOT EXISTS Kategoriler (Id INTEGER PRIMARY KEY AUTOINCREMENT, Ad TEXT UNIQUE);"; 
+                CREATE TABLE IF NOT EXISTS Kategoriler (Id INTEGER PRIMARY KEY AUTOINCREMENT, Ad TEXT, Tur TEXT, UNIQUE(Ad, Tur));"; 
             command.ExecuteNonQuery();
 
-            string[] varsayilanlar = { "Market", "Ulaşım", "Fatura", "Eğlence", "Maaş", "Avans" };
-            foreach (var kat in varsayilanlar)
-            {
-                KategoriEkle(kat);
-            }
+            // Varsayılan Giderleri Ekle
+            foreach (var kat in VarsayilanGiderler)
+                KategoriEkle(kat, "Gider");
+
+            // Varsayılan Gelirleri Ekle
+            foreach (var kat in VarsayilanGelirler)
+                KategoriEkle(kat, "Gelir");
         }
     }
 
-    public static void KategoriEkle(string kategoriAdi)
+    public static void KategoriEkle(string kategoriAdi, string tur)
     {
-        if (string.IsNullOrWhiteSpace(kategoriAdi)) return;
+        if (string.IsNullOrWhiteSpace(kategoriAdi) || string.IsNullOrWhiteSpace(tur)) return;
 
         using (var connection = new SqliteConnection(ConnectionString))
         {
             connection.Open();
             var cmd = connection.CreateCommand();
-            cmd.CommandText = "INSERT OR IGNORE INTO Kategoriler (Ad) VALUES ($ad)";
+            cmd.CommandText = "INSERT OR IGNORE INTO Kategoriler (Ad, Tur) VALUES ($ad, $tur)";
             cmd.Parameters.AddWithValue("$ad", kategoriAdi.Trim());
+            cmd.Parameters.AddWithValue("$tur", tur.Trim());
             cmd.ExecuteNonQuery();
         }
     }
 
-    public static void KategoriSil(string kategoriAdi)
+    public static void KategoriSil(string kategoriAdi, string tur)
     {
-        if (string.IsNullOrWhiteSpace(kategoriAdi)) return;
-
         using (var connection = new SqliteConnection(ConnectionString))
         {
             connection.Open();
             var cmd = connection.CreateCommand();
-            cmd.CommandText = "DELETE FROM Kategoriler WHERE Ad=@ad";
+            cmd.CommandText = "DELETE FROM Kategoriler WHERE Ad=@ad AND Tur=@tur";
             cmd.Parameters.AddWithValue("@ad", kategoriAdi.Trim());
+            cmd.Parameters.AddWithValue("@tur", tur.Trim());
             cmd.ExecuteNonQuery();
         }
     }
     
-    public static List<string> KategorileriGetir()
+    public static List<string> KategorileriGetir(string tur)
     {
         var liste = new List<string>();
         using (var connection = new SqliteConnection(ConnectionString))
         {
             connection.Open();
             var cmd = connection.CreateCommand();
-            cmd.CommandText = "SELECT Ad FROM Kategoriler ORDER BY Ad ASC"; // Alfabetik sıralı gelsin
+            cmd.CommandText = "SELECT Ad FROM Kategoriler WHERE Tur=@tur ORDER BY Ad ASC"; 
+            cmd.Parameters.AddWithValue("@tur", tur);
             using (var reader = cmd.ExecuteReader())
             {
                 while (reader.Read())
@@ -75,6 +81,13 @@ public static class DbManager
             }
         }
         return liste;
+    }
+
+    public static bool VarsayilanKategoriMi(string kategoriAdi, string tur)
+    {
+        if (tur == "Gider") return VarsayilanGiderler.Contains(kategoriAdi);
+        if (tur == "Gelir") return VarsayilanGelirler.Contains(kategoriAdi);
+        return false;
     }
 
     public static void PeriyodikIslemEkleGelistirilmis(string tur, string kategori, decimal miktar, int gun, string sonEklenenAy)
@@ -160,8 +173,7 @@ public static class DbManager
 
     public static void IslemEkle(string tur, string kategori, decimal miktar, string tarih)
     {
-        // YENİ: Bir işlem eklendiğinde, o kategoriyi veritabanına da eklemeyi dene. (Zaten varsa bir şey yapmaz)
-        KategoriEkle(kategori);
+        KategoriEkle(kategori, tur);
 
         using (var connection = new SqliteConnection(ConnectionString))
         {
@@ -190,7 +202,7 @@ public static class DbManager
 
     public static void IslemGuncelle(int id, string tur, string kategori, decimal miktar, string tarih)
     {
-        KategoriEkle(kategori); // Güncellerken yeni kategori yazılmışsa onu da kaydet
+        KategoriEkle(kategori, tur);
 
         using (var connection = new SqliteConnection(ConnectionString))
         {

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
 using System.Collections.Generic;
+using System.Globalization; 
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -17,18 +18,15 @@ public class MainForm : Form
     private Panel leftPanel, searchPanel, statsPanel, chartWrapper;
     private DataGridView dgvIslemler;
     private ComboBox cmbTur, cmbKategori;
-    private NumericUpDown nudMiktar;
+    private TextBox txtMiktar;
     private DateTimePicker dtpTarih;
     private CheckBox chkPeriyodik;
-    private Button btnEkle, btnSil, btnDuzenle, btnPdfExport, btnThemeToggle ,btnKategoriDlt;
+    private Button btnEkle, btnSil, btnDuzenle, btnPdfExport, btnThemeToggle, btnKategoriDlt;
     private TextBox txtArama;
     private Label lblToplamGelir, lblToplamGider, lblBakiye, lblKiyaslama;
     private Chart chartKategori;
     private bool isDarkMode = true;
     
-    // ARAYÜZ FONKSİYONLARI --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    
-    //Temel Arayüz Çizimi Fonk.
     public MainForm()
     {
         QuestPDF.Settings.License = LicenseType.Community;
@@ -41,12 +39,10 @@ public class MainForm : Form
         DbManager.OtomatikOdemeleriKontrolEt();
 
         InitializeUI();
-        KategorileriComboBoxaYukle();
         TabloyuYenile();
         ApplyTheme();
     }
     
-    //Arayüz Oluşturma Fonk.
     private void InitializeUI()
     {
         mainGrid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
@@ -62,10 +58,9 @@ public class MainForm : Form
         curY += 60;
 
         AddInput("Islem Türü:", cmbTur = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Standard }, ref curY);
-        cmbTur.Items.AddRange(new string[] { "Gider", "Gelir" }); cmbTur.SelectedIndex = 0;
+        cmbTur.Items.AddRange(new string[] { "Gider", "Gelir" });
 
         leftPanel.Controls.Add(new Label { Text = "Kategori (Yaz/Sec):", Location = new Point(25, curY), AutoSize = true, Font = new Font("Arial", 9, FontStyle.Bold) });
-        
         cmbKategori = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, FlatStyle = FlatStyle.Standard };
         cmbKategori.Location = new Point(25, curY + 22);
         cmbKategori.Width = 200;
@@ -74,9 +69,17 @@ public class MainForm : Form
         btnKategoriDlt = new Button { Text = "SİL", Location = new Point(230, curY + 21), Width = 40, Height = 28, BackColor = Color.DarkRed, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Arial", 8, FontStyle.Bold) };
         btnKategoriDlt.Click += BtnKategoriDlt_Click;
         leftPanel.Controls.Add(btnKategoriDlt);
+        curY += 65;
+
+        cmbTur.SelectedIndexChanged += (s, e) => KategorileriComboBoxaYukle();
+        cmbTur.SelectedIndex = 0;
         
-        
-        AddInput("Miktar (TL):", nudMiktar = new NumericUpDown { Maximum = 1000000, DecimalPlaces = 2, BorderStyle = BorderStyle.Fixed3D }, ref curY);
+        // Miktar için TextBox
+        txtMiktar = new TextBox { BorderStyle = BorderStyle.Fixed3D };
+        txtMiktar.TextChanged += TxtMiktar_TextChanged;
+        txtMiktar.KeyPress += TxtMiktar_KeyPress;
+        AddInput("Miktar (TL):", txtMiktar, ref curY);
+
         AddInput("Tarih:", dtpTarih = new DateTimePicker { Format = DateTimePickerFormat.Short }, ref curY);
 
         chkPeriyodik = new CheckBox { Text = "Her ay düzenli ödensin", Location = new Point(25, curY), AutoSize = true };
@@ -135,12 +138,20 @@ public class MainForm : Form
 
         dgvIslemler = new DataGridView { Dock = DockStyle.Fill, BackgroundColor = Color.White, SelectionMode = DataGridViewSelectionMode.FullRowSelect, AllowUserToAddRows = false, ReadOnly = true, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill };
         dgvIslemler.Columns.Add("Id", "ID"); dgvIslemler.Columns["Id"].Visible = false;
-        dgvIslemler.Columns.Add("Tur", "Tur"); dgvIslemler.Columns.Add("Kategori", "Kategori"); dgvIslemler.Columns.Add("Miktar", "Miktar"); dgvIslemler.Columns.Add("Tarih", "Tarih");
+        dgvIslemler.Columns.Add("Tur", "Tur"); 
+        dgvIslemler.Columns.Add("Kategori", "Kategori"); 
+        dgvIslemler.Columns.Add("Miktar", "Miktar"); 
+        dgvIslemler.Columns.Add("Tarih", "Tarih");
+        
+        // DataGridView Miktar Sütunu Formatlaması (Binlik ayırıcı virgül, kuruş nokta için)
+        dgvIslemler.Columns["Miktar"].DefaultCellStyle.Format = "N1";
+        dgvIslemler.Columns["Miktar"].DefaultCellStyle.FormatProvider = CultureInfo.InvariantCulture;
+        dgvIslemler.Columns["Miktar"].DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleLeft; // Sayıları sağa yasla
+
         dgvIslemler.CellClick += DgvIslemler_CellClick;
         rightGrid.Controls.Add(dgvIslemler, 0, 2);
     }
 
-    //Arayüz Renk ayarı VS. fONK.
     private void ApplyTheme()
     {
         Color bg = isDarkMode ? Color.FromArgb(33, 37, 41) : Color.FromArgb(240, 242, 245);
@@ -177,25 +188,30 @@ public class MainForm : Form
         lblToplamGider.ForeColor = isDarkMode ? Color.LightPink : Color.Red;
         lblBakiye.ForeColor = isDarkMode ? Color.LightSkyBlue : Color.Blue;
         btnThemeToggle.Text = isDarkMode ? "AYDINLIK MOD" : "KARANLIK MOD";
+        btnThemeToggle.BackColor = isDarkMode ? Color.Gray : Color.White;
         btnThemeToggle.ForeColor = txt;
     }
     
-    //TEMEL FONKSİYONLARI ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    
-    //Veri Tbanındaki Kategorileri Combo Boxa Yükleme Fonk.
     private void KategorileriComboBoxaYukle()
     {
+        if (cmbKategori == null || cmbTur == null) return;
+        
         string seciliKategori = cmbKategori.Text;
+        string seciliTur = cmbTur.Text; 
+        
         cmbKategori.Items.Clear();
-        var kategoriler = DbManager.KategorileriGetir();
+        var kategoriler = DbManager.KategorileriGetir(seciliTur);
         foreach (var kat in kategoriler)
         {
             cmbKategori.Items.Add(kat); 
         }
-        cmbKategori.Text = seciliKategori;
+
+        if (cmbKategori.Items.Contains(seciliKategori))
+            cmbKategori.Text = seciliKategori;
+        else
+            cmbKategori.Text = "";
     }
 
-    //Yeni Label Ekleme Fonk.
     private Label CreateDashLabel(string txt, int y, Panel p, Color c, bool bold = false)
     {
         Label l = new Label { Text = txt, Location = new Point(10, y), AutoSize = true, ForeColor = c, Font = new Font("Arial", bold ? 15 : 12, bold ? FontStyle.Bold : FontStyle.Regular) };
@@ -203,7 +219,6 @@ public class MainForm : Form
         return l;
     }
 
-    //Yeni İnput Ekleme Fonk.
     private void AddInput(string txt, Control ctrl, ref int y)
     {
         leftPanel.Controls.Add(new Label { Text = txt, Location = new Point(25, y), AutoSize = true, Font = new Font("Arial", 9, FontStyle.Bold) });
@@ -212,7 +227,6 @@ public class MainForm : Form
         y += 65;
     }
 
-    //Yeni Buton Ekleme Fonk.
     private Button CreateBtn(string txt, Color c, ref int y)
     {
         Button b = new Button { Text = txt, Location = new Point(25, y), Width = 240, Height = 42, BackColor = c, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Arial", 9, FontStyle.Bold) };
@@ -221,18 +235,19 @@ public class MainForm : Form
         return b;
     }
     
-    //Yeni Kayıt Eklendiğinde Tabloyu Yenileme Fonk.
     private void TabloyuYenile(string filtre = "")
     {
         dgvIslemler.Rows.Clear();
         var liste = DbManager.TumIslemleriGetir();
         var filtrelenmis = string.IsNullOrEmpty(filtre) ? liste : liste.Where(x => x.Kategori.ToLower().Contains(filtre.ToLower())).ToList();
+        
+        // Sütun formatlamasını atadığımız için doğrudan ekleyebiliriz
         foreach (var i in filtrelenmis) dgvIslemler.Rows.Add(i.Id, i.Tur, i.Kategori, i.Miktar, i.Tarih);
+        
         GuncelleDashboard();
         KategorileriComboBoxaYukle();
     }
 
-    //Yeni Kayıt Eklendiğinde Dashboardı Güncelleme Fonk.
     private void GuncelleDashboard()
     {
         decimal gel = 0, gid = 0;
@@ -272,37 +287,46 @@ public class MainForm : Form
             chartKategori.Series[0].Points.AddXY(item.Key, item.Value);
         }
 
-        lblToplamGelir.Text = $"Gelir: {gel:N2} TL";
-        lblToplamGider.Text = $"Gider: {gid:N2} TL";
-        lblBakiye.Text = $"Bakiye: {(gel - gid):N2} TL";
+        // Dashboard label'larını da InvariantCulture ile virgüllü formata getirebilirsin
+        lblToplamGelir.Text = $"Gelir: {gel.ToString("N2", CultureInfo.InvariantCulture)} TL";
+        lblToplamGider.Text = $"Gider: {gid.ToString("N2", CultureInfo.InvariantCulture)} TL";
+        lblBakiye.Text = $"Bakiye: {(gel - gid).ToString("N2", CultureInfo.InvariantCulture)} TL";
 
         decimal buAy = DbManager.AylikToplamGetir("Gider", 0);
         decimal gecenAy = DbManager.AylikToplamGetir("Gider", -1);
         if (gecenAy > 0) {
             decimal fark = ((buAy - gecenAy) / gecenAy) * 100;
-            lblKiyaslama.Text = $"Son 2 Ay Kiyaslamasi:\nGecen aya gore gideriniz %{Math.Abs(fark):N1} {(fark > 0 ? "arttı" : "azaldı")}";
+            lblKiyaslama.Text = $"Son 2 Ay Kiyaslamasi:\nGecen aya gore gideriniz %{Math.Abs(fark).ToString("N1", CultureInfo.InvariantCulture)} {(fark > 0 ? "arttı" : "azaldı")}";
         } else {
             lblKiyaslama.Text = "Son 2 Ay Kiyaslamasi:\nYeterli veri bekleniyor...";
         }
     }
 
-    //BUTON BASMA OLAYLARI ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    
-    //DataGridView seçme Fonk.
+    private decimal GetMiktar()
+    {
+        string text = txtMiktar.Text.Replace(",", "");
+        decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal miktar);
+        return miktar;
+    }
+
     private void DgvIslemler_CellClick(object sender, DataGridViewCellEventArgs e)
     {
         if (e.RowIndex >= 0) {
             var r = dgvIslemler.Rows[e.RowIndex];
             cmbTur.Text = r.Cells["Tur"].Value?.ToString();
             cmbKategori.Text = r.Cells["Kategori"].Value?.ToString();
-            nudMiktar.Value = Convert.ToDecimal(r.Cells["Miktar"].Value);
+            
+            if (r.Cells["Miktar"].Value != null)
+                txtMiktar.Text = Convert.ToDecimal(r.Cells["Miktar"].Value).ToString("N2", CultureInfo.InvariantCulture);
+            
             if (DateTime.TryParse(r.Cells["Tarih"].Value?.ToString(), out DateTime dt)) dtpTarih.Value = dt;
         }
     }
 
-    //Yeni Kayıt OLuşturma Fonk.
     private void BtnEkle_Click(object sender, EventArgs e)
     {
+        decimal miktar = GetMiktar();
+
         if (chkPeriyodik.Checked) 
         {
             DateTime islemTarihi = dtpTarih.Value.Date;
@@ -313,7 +337,7 @@ public class MainForm : Form
             {
                 while (donguTarihi <= bugun)
                 {
-                    DbManager.IslemEkle(cmbTur.Text, cmbKategori.Text, nudMiktar.Value, donguTarihi.ToShortDateString());
+                    DbManager.IslemEkle(cmbTur.Text, cmbKategori.Text, miktar, donguTarihi.ToShortDateString());
                     sonEklenenAyYil = donguTarihi.ToString("MM/yyyy");
                     donguTarihi = donguTarihi.AddMonths(1);
                 }
@@ -322,33 +346,37 @@ public class MainForm : Form
             {
                 MessageBox.Show($"Düzenli işlem kaydedildi. Zamanı geldiğinde (Ayın {islemTarihi.Day}. günü) bakiyenize yansıyacaktır.", "Bilgi");
             }
-            DbManager.PeriyodikIslemEkleGelistirilmis(cmbTur.Text, cmbKategori.Text, nudMiktar.Value, islemTarihi.Day, sonEklenenAyYil);
+            DbManager.PeriyodikIslemEkleGelistirilmis(cmbTur.Text, cmbKategori.Text, miktar, islemTarihi.Day, sonEklenenAyYil);
         }
         else 
         {
-            DbManager.IslemEkle(cmbTur.Text, cmbKategori.Text, nudMiktar.Value, dtpTarih.Value.ToShortDateString());
+            DbManager.IslemEkle(cmbTur.Text, cmbKategori.Text, miktar, dtpTarih.Value.ToShortDateString());
         }
 
         TabloyuYenile();
-        nudMiktar.Value = 0;
+        txtMiktar.Text = "";
         chkPeriyodik.Checked = false;
     }
 
-    //Kayıt Düzenleme Kayıt Fonk.
-    private void BtnDuzenle_Click(object sender, EventArgs e) {
+    private void BtnDuzenle_Click(object sender, EventArgs e) 
+    {
         if (dgvIslemler.SelectedRows.Count > 0)
         {
-            DbManager.IslemGuncelle(Convert.ToInt32(dgvIslemler.SelectedRows[0].Cells["Id"].Value), cmbTur.Text, cmbKategori.Text, nudMiktar.Value, dtpTarih.Value.ToShortDateString()); TabloyuYenile();
-        } }
+            decimal miktar = GetMiktar();
+            DbManager.IslemGuncelle(Convert.ToInt32(dgvIslemler.SelectedRows[0].Cells["Id"].Value), cmbTur.Text, cmbKategori.Text, miktar, dtpTarih.Value.ToShortDateString()); 
+            TabloyuYenile();
+        } 
+    }
 
-    //Kayıt Silme Fonk.
-    private void BtnSil_Click(object sender, EventArgs e) {
+    private void BtnSil_Click(object sender, EventArgs e) 
+    {
         if (dgvIslemler.SelectedRows.Count > 0)
         {
-            DbManager.IslemSil(Convert.ToInt32(dgvIslemler.SelectedRows[0].Cells["Id"].Value)); TabloyuYenile();
-        } }
+            DbManager.IslemSil(Convert.ToInt32(dgvIslemler.SelectedRows[0].Cells["Id"].Value)); 
+            TabloyuYenile();
+        } 
+    }
 
-    //Kayıtları Pdf Olarak Dışarı Çıkartan Fonk.
     private void BtnPdfExport_Click(object sender, EventArgs e)
     {
         var save = new SaveFileDialog { Filter = "PDF|*.pdf", FileName = "Finans_Raporu.pdf" };
@@ -363,7 +391,17 @@ public class MainForm : Form
                         foreach (DataGridViewRow r in dgvIslemler.Rows) {
                             t.Cell().Text(r.Cells["Kategori"].Value?.ToString() ?? "");
                             t.Cell().Text(r.Cells["Tur"].Value?.ToString() ?? "");
-                            t.Cell().Text((r.Cells["Miktar"].Value?.ToString() ?? "0") + " TL");
+                            
+                            // PDF içine aktarırken de formata uygun aktar
+                            if (r.Cells["Miktar"].Value != null)
+                            {
+                                decimal val = Convert.ToDecimal(r.Cells["Miktar"].Value);
+                                t.Cell().Text(val.ToString("N2", CultureInfo.InvariantCulture) + " TL");
+                            }
+                            else
+                            {
+                                t.Cell().Text("0.00 TL");
+                            }
                         }
                     });
                     p.Footer().Text(x => { x.Span("Bakiye: "); x.Span(lblBakiye.Text).Bold(); });
@@ -373,19 +411,76 @@ public class MainForm : Form
         }
     }
     
-    //Kayıtlı Kategorileri Silme Fonk.
     private void BtnKategoriDlt_Click(object sender, EventArgs e)
     {
         string silinecek = cmbKategori.Text;
+        string tur = cmbTur.Text;
+        
         if (!string.IsNullOrWhiteSpace(silinecek))
         {
-            if (MessageBox.Show($"'{silinecek}' kategorisini veritabanından kalıcı olarak silmek istediğinize emin misiniz? (Mevcut işlemleriniz silinmez)", "Onay", MessageBoxButtons.YesNo) == DialogResult.Yes)
+            if (DbManager.VarsayilanKategoriMi(silinecek, tur))
             {
-                DbManager.KategoriSil(silinecek);
+                MessageBox.Show("Sistem için varsayılan kategorileri silemezsiniz!", "Hata", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return; 
+            }
+
+            if (MessageBox.Show($"'{silinecek}' ({tur}) kategorisini kalıcı olarak silmek istediğinize emin misiniz? (Mevcut işlemleriniz silinmez)", "Onay", MessageBoxButtons.YesNo) == DialogResult.Yes)
+            {
+                DbManager.KategoriSil(silinecek, tur);
                 cmbKategori.Text = "";
                 KategorileriComboBoxaYukle();
                 MessageBox.Show("Kategori başarıyla silindi!");
             }
+        }
+    }
+
+    private void TxtMiktar_TextChanged(object sender, EventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(txtMiktar.Text)) return;
+
+        txtMiktar.TextChanged -= TxtMiktar_TextChanged;
+
+        int cursorPosition = txtMiktar.SelectionStart;
+        int lengthBefore = txtMiktar.Text.Length;
+
+        string text = txtMiktar.Text.Replace(",", "");
+
+        if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal number))
+        {
+            if (txtMiktar.Text.EndsWith("."))
+            {
+                txtMiktar.Text = number.ToString("N0", CultureInfo.InvariantCulture) + ".";
+            }
+            else if (text.Contains("."))
+            {
+                string[] parts = text.Split('.');
+                if (decimal.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out decimal wholeNumber))
+                {
+                    txtMiktar.Text = wholeNumber.ToString("N0", CultureInfo.InvariantCulture) + "." + parts[1];
+                }
+            }
+            else
+            {
+                txtMiktar.Text = number.ToString("N0", CultureInfo.InvariantCulture);
+            }
+        }
+
+        int lengthAfter = txtMiktar.Text.Length;
+        txtMiktar.SelectionStart = Math.Max(0, cursorPosition + (lengthAfter - lengthBefore));
+
+        txtMiktar.TextChanged += TxtMiktar_TextChanged;
+    }
+
+    private void TxtMiktar_KeyPress(object sender, KeyPressEventArgs e)
+    {
+        if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar) && e.KeyChar != '.')
+        {
+            e.Handled = true;
+        }
+
+        if (e.KeyChar == '.' && txtMiktar.Text.Contains("."))
+        {
+            e.Handled = true;
         }
     }
 }
